@@ -47,6 +47,7 @@ public class VoiceMessages extends Plugin {
     WaveFormView waveFormView;
     FlexEditText editText;
     ImageButton recordButton;
+    ViewGroup inputContainer;
     File outputFile;
     private MediaRecorder mediaRecorder;
     private volatile boolean isRecording;
@@ -145,25 +146,24 @@ public class VoiceMessages extends Plugin {
 
             editText = input.getView().findViewById(Utils.getResId("text_input", "id"));
 
-            var viewgroup = ((ViewGroup) input.getView().findViewById(Utils.getResId("main_input_container", "id")));
-            detachFromParent(waveFormView);
-            if (waveFormView.getParent() != null) {
-                waveFormView = new WaveFormView(context);
-            }
-            viewgroup.addView(waveFormView, 0);
-            var params = (LinearLayout.LayoutParams) waveFormView.getLayoutParams();
-            params.height = DimenUtils.dpToPx(30);
-            params.gravity = Gravity.CENTER;
-            waveFormView.setVisibility(View.GONE);
+            inputContainer = (ViewGroup) input.getView().findViewById(Utils.getResId("main_input_container", "id"));
 
-            detachFromParent(recordButton);
-            viewgroup.addView(recordButton);
+            attachViews();
+
+            // Other plugins (e.g. ActivitiesV2) and themes may rebuild the input
+            // container after us, which silently drops our views. Re-attach a few
+            // times while everything is still loading.
+            Utils.mainThread.postDelayed(this::attachViews, 1000);
+            Utils.mainThread.postDelayed(this::attachViews, 3000);
+            Utils.mainThread.postDelayed(this::attachViews, 6000);
         });
 
         patcher.patch(WidgetChatInputEditText$setOnTextChangedListener$1.class.getDeclaredMethod("afterTextChanged", Editable.class), cf -> {
             if (editText == null || recordButton == null) {
                 return;
             }
+
+            attachViews();
 
             if (editText.getText() == null || editText.getText().toString().equals("")) {
                 var selectedChannel = StoreStream.getChannelsSelected().getSelectedChannel();
@@ -185,6 +185,7 @@ public class VoiceMessages extends Plugin {
             var id = (long) cf.args[0];
 
             if (id != 0L) {
+                Utils.mainThread.post(this::attachViews);
                 try {
                     showVoiceChannelIconIfCan(id);
                 } catch (NullPointerException e) {
@@ -192,6 +193,46 @@ public class VoiceMessages extends Plugin {
                 }
             }
         });
+    }
+
+    /**
+     * Makes sure the waveform view and the record button are children of the
+     * *current* input container. Safe to call as often as you like: it only
+     * touches the view tree when something actually got detached.
+     * Must run on the main thread.
+     */
+    private void attachViews() {
+        if (inputContainer == null || recordButton == null || waveFormView == null) {
+            return;
+        }
+
+        try {
+            if (waveFormView.getParent() != inputContainer) {
+                detachFromParent(waveFormView);
+                inputContainer.addView(waveFormView, 0);
+                var params = (LinearLayout.LayoutParams) waveFormView.getLayoutParams();
+                params.height = DimenUtils.dpToPx(30);
+                params.gravity = Gravity.CENTER;
+                waveFormView.setVisibility(isRecording ? View.VISIBLE : View.GONE);
+            }
+
+            if (recordButton.getParent() != inputContainer) {
+                detachFromParent(recordButton);
+                inputContainer.addView(recordButton);
+
+                // Re-apply the correct visibility for the channel we are in
+                if (editText != null && editText.getText() != null && !editText.getText().toString().equals("")) {
+                    recordButton.setVisibility(View.GONE);
+                } else {
+                    var selectedId = StoreStream.getChannelsSelected().getId();
+                    if (selectedId != 0L) {
+                        showVoiceChannelIconIfCan(selectedId);
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            logger.error(e);
+        }
     }
 
     private void detachFromParent(View view) {
@@ -370,6 +411,7 @@ public class VoiceMessages extends Plugin {
         } catch (RuntimeException ignored) {}
         detachFromParent(waveFormView);
         detachFromParent(recordButton);
+        inputContainer = null;
         patcher.unpatchAll();
         commands.unregisterAll();
     }
