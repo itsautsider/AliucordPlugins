@@ -51,6 +51,7 @@ public class VoiceMessages extends Plugin {
     File outputFile;
     private MediaRecorder mediaRecorder;
     private volatile boolean isRecording;
+    private volatile boolean locked;
     private final Runnable updateWaveform = () -> {
 
         while (isRecording && !Thread.currentThread().isInterrupted()) {
@@ -112,20 +113,40 @@ public class VoiceMessages extends Plugin {
         recordButton.setOnTouchListener((view, motionEvent) -> {
             switch (motionEvent.getAction()) {
                 case MotionEvent.ACTION_DOWN:
+                    // In locked mode a tap stops and sends the recording
+                    if (isRecording && locked) {
+                        onRecordStop(true, StoreStream.getChannelsSelected().getId());
+                        return true;
+                    }
                     try {
                         onRecordStart();
                     } catch (IOException e) {
                         logger.error(e);
                     }
                     return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (isRecording && !locked) {
+                        if (motionEvent.getX() < -DimenUtils.dpToPx(80)) {
+                            // swipe left -> discard
+                            onRecordStop(false, 0L);
+                            Utils.showToast("Cancelled recording");
+                        } else if (motionEvent.getY() < -DimenUtils.dpToPx(60)) {
+                            // swipe up -> lock, so the user can let go
+                            locked = true;
+                            Utils.showToast("Recording locked - tap to send");
+                        }
+                    }
+                    return true;
                 case MotionEvent.ACTION_UP:
-                    if (isRecording) {
+                    if (isRecording && !locked) {
                         onRecordStop(true, StoreStream.getChannelsSelected().getId());
                     }
                     return true;
-                case (MotionEvent.ACTION_MOVE):
-                    // check if user moved finger out of button
-                    if (isRecording && (motionEvent.getY() < 0 || motionEvent.getY() > view.getHeight())) {
+                case MotionEvent.ACTION_CANCEL:
+                    // Touch stream got killed (e.g. layout rebuilt underneath us).
+                    // Never leave the recorder running, that's what caused the
+                    // "invisible locked button" bug.
+                    if (isRecording && !locked) {
                         onRecordStop(false, 0L);
                         Utils.showToast("Cancelled recording");
                     }
@@ -203,6 +224,12 @@ public class VoiceMessages extends Plugin {
      */
     private void attachViews() {
         if (inputContainer == null || recordButton == null || waveFormView == null) {
+            return;
+        }
+
+        // Never re-attach while recording: removeView() kills the ongoing touch
+        // stream, so ACTION_UP never arrives and the recording can't be stopped.
+        if (isRecording) {
             return;
         }
 
@@ -301,6 +328,7 @@ public class VoiceMessages extends Plugin {
         }
 
         isRecording = false;
+        locked = false;
         if (updateWaveformThread != null && updateWaveformThread.isAlive()) {
             updateWaveformThread.interrupt();
         }
@@ -322,6 +350,10 @@ public class VoiceMessages extends Plugin {
 
         waveFormView.setVisibility(View.GONE);
         editText.setVisibility(View.VISIBLE);
+
+        // Layout may have been rebuilt while we were recording - restore now
+        // that no touch gesture is in flight.
+        Utils.mainThread.post(this::attachViews);
 
         if (send && stopped && recordedFile != null) {
             Utils.threadPool.execute(() -> {
@@ -409,6 +441,7 @@ public class VoiceMessages extends Plugin {
         try {
             mediaRecorder.release();
         } catch (RuntimeException ignored) {}
+        locked = false;
         detachFromParent(waveFormView);
         detachFromParent(recordButton);
         inputContainer = null;
@@ -416,3 +449,4 @@ public class VoiceMessages extends Plugin {
         commands.unregisterAll();
     }
 }
+
