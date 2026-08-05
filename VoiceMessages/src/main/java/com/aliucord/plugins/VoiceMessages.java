@@ -157,9 +157,7 @@ public class VoiceMessages extends Plugin {
             waveFormView.setVisibility(View.GONE);
 
             detachFromParent(recordButton);
-            if (recordButton.getParent() != null) {
-                viewgroup.addView(recordButton);
-            }
+            viewgroup.addView(recordButton);
         });
 
         patcher.patch(WidgetChatInputEditText$setOnTextChangedListener$1.class.getDeclaredMethod("afterTextChanged", Editable.class), cf -> {
