@@ -240,6 +240,16 @@ public class VoiceMessages extends Plugin {
                 var params = (LinearLayout.LayoutParams) waveFormView.getLayoutParams();
                 params.height = DimenUtils.dpToPx(30);
                 params.gravity = Gravity.CENTER;
+
+                // In a horizontal container a full width waveform pushes the
+                // record button off screen. Share the row instead.
+                if (inputContainer instanceof LinearLayout
+                        && ((LinearLayout) inputContainer).getOrientation() == LinearLayout.HORIZONTAL) {
+                    params.width = 0;
+                    params.weight = 1f;
+                }
+                waveFormView.setLayoutParams(params);
+
                 waveFormView.setVisibility(isRecording ? View.VISIBLE : View.GONE);
             }
 
