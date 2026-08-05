@@ -2,7 +2,7 @@ version = "1.1.5"
 description = "Send Voice Messages"
 
 aliucord.changelog.set("""
-# 1.1.4
+# 1.1.5
 * Voice Button not showing up fixed
 
 # 1.1.4
